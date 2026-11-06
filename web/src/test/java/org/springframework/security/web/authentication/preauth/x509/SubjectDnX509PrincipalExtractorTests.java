@@ -68,4 +68,13 @@ public class SubjectDnX509PrincipalExtractorTests {
 				.buildTestCertificateWithCnAtEnd());
 		assertThat(principal).isEqualTo("Duke");
 	}
+
+	// gh-19254
+	@Test
+	public void defaultCNPatternReturnsMostSpecificPrincipalWhenMultipleCns()
+			throws Exception {
+		Object principal = extractor.extractPrincipal(X509TestUtils
+				.buildTestCertificateWithMultipleCns());
+		assertThat(principal).isEqualTo("alice");
+	}
 }
