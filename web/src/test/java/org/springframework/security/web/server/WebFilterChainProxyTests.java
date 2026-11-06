@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2024 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,18 +16,33 @@
 
 package org.springframework.security.web.server;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+
 import org.junit.Test;
+import reactor.core.publisher.Mono;
+
 import org.springframework.http.HttpStatus;
+import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
+import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.security.web.server.firewall.ServerExchangeRejectedException;
+import org.springframework.security.web.server.firewall.ServerExchangeRejectedHandler;
+import org.springframework.security.web.server.firewall.ServerWebExchangeFirewall;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatcher;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatcher.MatchResult;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
-import reactor.core.publisher.Mono;
 
-import java.util.Arrays;
-import java.util.List;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyZeroInteractions;
 
 /**
  * @author Rob Winch
@@ -48,6 +63,117 @@ public class WebFilterChainProxyTests {
 			.get()
 			.exchange()
 			.expectStatus().isNotFound();
+	}
+
+	@Test
+	public void doFilterWhenFirewallThenBadRequest() {
+		List<WebFilter> filters = Arrays.asList(new Http200WebFilter());
+		ServerWebExchangeMatcher notMatch = (exchange) -> MatchResult.notMatch();
+		MatcherSecurityWebFilterChain chain = new MatcherSecurityWebFilterChain(notMatch, filters);
+		WebFilterChainProxy filter = new WebFilterChainProxy(chain);
+		WebTestClient.bindToController(new Object()).webFilter(filter).build().get().uri("/invalid;/").exchange()
+				.expectStatus().isBadRequest();
+	}
+
+	// gh-15989
+	@Test
+	public void doFilterWhenDefaultFirewallAndChainMutatesRequestHeaderThenHeaderAdded() {
+		ServerWebExchangeMatcher notMatch = (exchange) -> MatchResult.notMatch();
+		MatcherSecurityWebFilterChain chain = new MatcherSecurityWebFilterChain(notMatch,
+				Arrays.asList(new Http200WebFilter()));
+		WebFilterChainProxy filter = new WebFilterChainProxy(chain);
+		AtomicReference<String> addedHeader = new AtomicReference<>();
+		WebFilterChain delegate = (e) -> {
+			ServerHttpRequest mutated = e.getRequest().mutate().header("Added", "added").build();
+			addedHeader.set(mutated.getHeaders().getFirst("Added"));
+			return Mono.empty();
+		};
+		MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/test").build());
+		filter.filter(exchange, delegate).block();
+		assertThat(addedHeader.get()).isEqualTo("added");
+	}
+
+	@Test
+	public void doFilterWhenFirewallRejectsThenBadRequest() {
+		List<WebFilter> filters = Arrays.asList(new Http200WebFilter());
+		ServerWebExchangeMatcher notMatch = (exchange) -> MatchResult.notMatch();
+		MatcherSecurityWebFilterChain chain = new MatcherSecurityWebFilterChain(notMatch, filters);
+		WebFilterChainProxy filter = new WebFilterChainProxy(chain);
+		ServerWebExchangeFirewall firewall = mock(ServerWebExchangeFirewall.class);
+		given(firewall.getFirewalledExchange(any()))
+			.willReturn(Mono.error(new ServerExchangeRejectedException("Rejected")));
+		filter.setFirewall(firewall);
+		MockServerHttpRequest request = MockServerHttpRequest.get("/test").build();
+		MockServerWebExchange exchange = MockServerWebExchange.from(request);
+		filter.filter(exchange, (e) -> Mono.empty()).block();
+		assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+	}
+
+	@Test
+	public void doFilterWhenCustomFirewallThenInvoked() {
+		List<WebFilter> filters = Arrays.asList(new Http200WebFilter());
+		ServerWebExchangeMatcher notMatch = (exchange) -> MatchResult.notMatch();
+		MatcherSecurityWebFilterChain chain = new MatcherSecurityWebFilterChain(notMatch, filters);
+		WebFilterChainProxy filter = new WebFilterChainProxy(chain);
+		ServerExchangeRejectedHandler handler = mock(ServerExchangeRejectedHandler.class);
+		ServerWebExchangeFirewall firewall = mock(ServerWebExchangeFirewall.class);
+		filter.setFirewall(firewall);
+		filter.setExchangeRejectedHandler(handler);
+		WebTestClient.bindToController(new Object()).webFilter(filter).build().get().exchange();
+		verify(firewall).getFirewalledExchange(any());
+		verifyZeroInteractions(handler);
+	}
+
+	@Test
+	public void doFilterWhenCustomExchangeRejectedHandlerThenInvoked() {
+		List<WebFilter> filters = Arrays.asList(new Http200WebFilter());
+		ServerWebExchangeMatcher notMatch = (exchange) -> MatchResult.notMatch();
+		MatcherSecurityWebFilterChain chain = new MatcherSecurityWebFilterChain(notMatch, filters);
+		WebFilterChainProxy filter = new WebFilterChainProxy(chain);
+		ServerExchangeRejectedHandler handler = mock(ServerExchangeRejectedHandler.class);
+		ServerWebExchangeFirewall firewall = mock(ServerWebExchangeFirewall.class);
+		given(firewall.getFirewalledExchange(any()))
+			.willReturn(Mono.error(new ServerExchangeRejectedException("Oops")));
+		filter.setFirewall(firewall);
+		filter.setExchangeRejectedHandler(handler);
+		WebTestClient.bindToController(new Object()).webFilter(filter).build().get().exchange();
+		verify(firewall).getFirewalledExchange(any());
+		verify(handler).handle(any(), any());
+	}
+
+	@Test
+	public void doFilterWhenDelayedServerExchangeRejectedException() {
+		List<WebFilter> filters = Arrays.asList(new WebFilter() {
+			@Override
+			public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+				return Mono.error(new ServerExchangeRejectedException("Ooops"));
+			}
+		});
+		ServerWebExchangeMatcher match = (exchange) -> MatchResult.match();
+		MatcherSecurityWebFilterChain chain = new MatcherSecurityWebFilterChain(match, filters);
+		WebFilterChainProxy filter = new WebFilterChainProxy(chain);
+		ServerExchangeRejectedHandler handler = mock(ServerExchangeRejectedHandler.class);
+		filter.setExchangeRejectedHandler(handler);
+		WebTestClient.bindToController(new Object())
+			.webFilter(filter)
+			.build()
+			.get()
+			.exchange();
+		verify(handler).handle(any(), any());
+	}
+
+	@Test
+	public void doFilterWhenDefaultFirewallAndPathNotNormalizedThenBadRequest() {
+		List<WebFilter> filters = Arrays.asList(new Http200WebFilter());
+		ServerWebExchangeMatcher match = (exchange) -> MatchResult.match();
+		MatcherSecurityWebFilterChain chain = new MatcherSecurityWebFilterChain(match, filters);
+		WebFilterChainProxy filter = new WebFilterChainProxy(chain);
+		WebFilterChain delegate = mock(WebFilterChain.class);
+		MockServerHttpRequest request = MockServerHttpRequest.get("/static/../admin").build();
+		MockServerWebExchange exchange = MockServerWebExchange.from(request);
+		filter.filter(exchange, delegate).block();
+		assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+		verifyZeroInteractions(delegate);
 	}
 
 	static class Http200WebFilter implements WebFilter {
