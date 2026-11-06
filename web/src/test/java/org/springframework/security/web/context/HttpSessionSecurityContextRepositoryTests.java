@@ -302,6 +302,44 @@ public class HttpSessionSecurityContextRepositoryTests {
 				SecurityContextHolder.getContext());
 	}
 
+	@Test
+	public void setHeaderContentLengthAndBodyWrittenCausesEarlySaveOfContext() throws Exception {
+		HttpSessionSecurityContextRepository repo = new HttpSessionSecurityContextRepository();
+		repo.setSpringSecurityContextKey("imTheContext");
+		MockHttpServletRequest request = new MockHttpServletRequest();
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		HttpRequestResponseHolder holder = new HttpRequestResponseHolder(request,
+				response);
+		SecurityContextHolder.setContext(repo.loadContext(holder));
+		SecurityContextHolder.getContext().setAuthentication(testToken);
+		String body = "body";
+		holder.getResponse().setHeader("Content-Length", String.valueOf(body.length()));
+		holder.getResponse().getWriter().write(body);
+		assertThat(request.getSession().getAttribute("imTheContext")).isEqualTo(
+				SecurityContextHolder.getContext());
+		assertThat(
+				((SaveContextOnUpdateOrErrorResponseWrapper) holder.getResponse()).isContextSaved()).isTrue();
+	}
+
+	@Test
+	public void setIntHeaderContentLengthAndBodyWrittenCausesEarlySaveOfContext() throws Exception {
+		HttpSessionSecurityContextRepository repo = new HttpSessionSecurityContextRepository();
+		repo.setSpringSecurityContextKey("imTheContext");
+		MockHttpServletRequest request = new MockHttpServletRequest();
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		HttpRequestResponseHolder holder = new HttpRequestResponseHolder(request,
+				response);
+		SecurityContextHolder.setContext(repo.loadContext(holder));
+		SecurityContextHolder.getContext().setAuthentication(testToken);
+		String body = "body";
+		holder.getResponse().setIntHeader("Content-Length", body.length());
+		holder.getResponse().getOutputStream().print(body);
+		assertThat(request.getSession().getAttribute("imTheContext")).isEqualTo(
+				SecurityContextHolder.getContext());
+		assertThat(
+				((SaveContextOnUpdateOrErrorResponseWrapper) holder.getResponse()).isContextSaved()).isTrue();
+	}
+
 	// SEC-2005
 	@Test
 	public void flushBufferCausesEarlySaveOfContext() throws Exception {

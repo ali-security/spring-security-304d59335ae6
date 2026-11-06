@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.BiConsumer;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -139,6 +140,55 @@ public class HeaderWriterFilterTests {
 
 		filter.doFilter(request, response, (request1, response1) -> verify(HeaderWriterFilterTests.this.writer1).writeHeaders(
 				any(HttpServletRequest.class), any(HttpServletResponse.class)));
+
+		verifyNoMoreInteractions(this.writer1);
+	}
+
+	@Test
+	public void doFilterWhenAddHeaderContentLengthAndBodyWrittenThenHeadersWrittenBeforeCommit() throws Exception {
+		assertHeadersWrittenOnceBodyFullyWritten(
+				(response, length) -> response.addHeader("Content-Length", String.valueOf(length)));
+	}
+
+	@Test
+	public void doFilterWhenSetHeaderContentLengthAndBodyWrittenThenHeadersWrittenBeforeCommit() throws Exception {
+		assertHeadersWrittenOnceBodyFullyWritten(
+				(response, length) -> response.setHeader("Content-Length", String.valueOf(length)));
+	}
+
+	@Test
+	public void doFilterWhenSetIntHeaderContentLengthAndBodyWrittenThenHeadersWrittenBeforeCommit() throws Exception {
+		assertHeadersWrittenOnceBodyFullyWritten(
+				(response, length) -> response.setIntHeader("content-length", length));
+	}
+
+	@Test
+	public void doFilterWhenAddIntHeaderContentLengthAndBodyWrittenThenHeadersWrittenBeforeCommit() throws Exception {
+		assertHeadersWrittenOnceBodyFullyWritten(
+				(response, length) -> response.addIntHeader("Content-Length", length));
+	}
+
+	private void assertHeadersWrittenOnceBodyFullyWritten(BiConsumer<HttpServletResponse, Integer> contentLengthSetter)
+			throws Exception {
+		HeaderWriterFilter filter = new HeaderWriterFilter(
+				Collections.singletonList(this.writer1));
+		String body = "body";
+
+		MockHttpServletRequest mockRequest = new MockHttpServletRequest();
+		MockHttpServletResponse mockResponse = new MockHttpServletResponse();
+
+		filter.doFilter(mockRequest, mockResponse, (request, response) -> {
+			contentLengthSetter.accept((HttpServletResponse) response, body.length());
+
+			verifyZeroInteractions(HeaderWriterFilterTests.this.writer1);
+
+			response.getWriter().write(body);
+
+			// the container commits the response as soon as Content-Length bytes are
+			// written, so the security headers must already have been written by now
+			verify(HeaderWriterFilterTests.this.writer1).writeHeaders(
+					any(HttpServletRequest.class), any(HttpServletResponse.class));
+		});
 
 		verifyNoMoreInteractions(this.writer1);
 	}

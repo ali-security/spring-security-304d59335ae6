@@ -25,12 +25,14 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.web.util.OnCommittedResponseWrapper;
 
 import javax.servlet.ServletOutputStream;
 import javax.servlet.http.HttpServletResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -1123,6 +1125,108 @@ public class OnCommittedResponseWrapperTests {
 	}
 
 	@Test
+	public void addHeaderNullNameDoesNotThrow() {
+		assertThatCode(() -> response.addHeader(null, "value")).doesNotThrowAnyException();
+	}
+
+	@Test
+	public void addHeaderNullValueDoesNotThrow() {
+		assertThatCode(() -> response.addHeader(HttpHeaders.CONTENT_LENGTH, null)).doesNotThrowAnyException();
+	}
+
+	@Test
+	public void addIntHeaderContentLengthPrintWriterWriteStringCommits() throws Exception {
+		int expected = 1234;
+		response.addIntHeader("Content-Length", String.valueOf(expected).length());
+
+		response.getWriter().write(expected);
+
+		assertThat(committed).isTrue();
+	}
+
+	@Test
+	public void addIntHeaderNullNameDoesNotThrow() {
+		assertThatCode(() -> response.addIntHeader(null, 1)).doesNotThrowAnyException();
+	}
+
+	@Test
+	public void setHeaderContentLengthPrintWriterWriteStringCommits() throws Exception {
+		int expected = 1234;
+		response.setHeader("Content-Length", String.valueOf(String.valueOf(expected).length()));
+
+		response.getWriter().write(expected);
+
+		assertThat(committed).isTrue();
+	}
+
+	@Test
+	public void setHeaderNullNameDoesNotThrow() {
+		assertThatCode(() -> response.setHeader(null, "value")).doesNotThrowAnyException();
+	}
+
+	@Test
+	public void setHeaderNullValueDoesNotThrow() {
+		assertThatCode(() -> response.setHeader(HttpHeaders.CONTENT_LENGTH, null)).doesNotThrowAnyException();
+	}
+
+	@Test
+	public void setIntHeaderContentLengthPrintWriterWriteStringCommits() throws Exception {
+		int expected = 1234;
+		response.setIntHeader("Content-Length", String.valueOf(expected).length());
+
+		response.getWriter().write(expected);
+
+		assertThat(committed).isTrue();
+	}
+
+	@Test
+	public void setIntHeaderNullNameDoesNotThrow() {
+		assertThatCode(() -> response.setIntHeader(null, 1)).doesNotThrowAnyException();
+	}
+
+	@Test
+	public void setHeaderContentLengthOutputStreamWriteStringCommits() throws Exception {
+		String body = "something";
+		response.setHeader("content-length", String.valueOf(body.length()));
+
+		response.getOutputStream().print(body);
+
+		assertThat(committed).isTrue();
+	}
+
+	@Test
+	public void setIntHeaderContentLengthOutputStreamWriteStringCommits() throws Exception {
+		String body = "something";
+		response.setIntHeader("CONTENT-LENGTH", body.length());
+
+		response.getOutputStream().print(body);
+
+		assertThat(committed).isTrue();
+	}
+
+	@Test
+	public void addIntHeaderContentLengthOutputStreamWriteStringCommits() throws Exception {
+		String body = "something";
+		response.addIntHeader(HttpHeaders.CONTENT_LENGTH, body.length());
+
+		response.getOutputStream().print(body);
+
+		assertThat(committed).isTrue();
+	}
+
+	@Test
+	public void setHeaderContentLengthDoesNotCommit() {
+		response.setHeader("Content-Length", "9");
+		response.setIntHeader("Content-Length", 9);
+		response.addIntHeader("Content-Length", 9);
+
+		assertThat(committed).isFalse();
+		verify(delegate).setHeader("Content-Length", "9");
+		verify(delegate).setIntHeader("Content-Length", 9);
+		verify(delegate).addIntHeader("Content-Length", 9);
+	}
+
+	@Test
 	public void bufferSizePrintWriterWriteCommits() throws Exception {
 		String expected = "1234567890";
 		when(response.getBufferSize()).thenReturn(expected.length());
@@ -1146,5 +1250,78 @@ public class OnCommittedResponseWrapperTests {
 		response.getWriter().write(expected);
 
 		assertThat(committed).isFalse();
+	}
+
+	@Test
+	public void printWriterPrintNullStringDoesNotThrow() throws Exception {
+		String s = null;
+		assertThatCode(() -> response.getWriter().print(s)).doesNotThrowAnyException();
+		verify(writer).print(s);
+	}
+
+	@Test
+	public void printWriterPrintlnNullStringDoesNotThrow() throws Exception {
+		String s = null;
+		assertThatCode(() -> response.getWriter().println(s)).doesNotThrowAnyException();
+		verify(writer).println(s);
+	}
+
+	@Test
+	public void printWriterPrintNullObjectDoesNotThrow() throws Exception {
+		Object obj = null;
+		assertThatCode(() -> response.getWriter().print(obj)).doesNotThrowAnyException();
+		verify(writer).print(obj);
+	}
+
+	@Test
+	public void printWriterPrintlnNullObjectDoesNotThrow() throws Exception {
+		Object obj = null;
+		assertThatCode(() -> response.getWriter().println(obj)).doesNotThrowAnyException();
+		verify(writer).println(obj);
+	}
+
+	@Test
+	public void printWriterWriteNullStringDoesNotThrow() throws Exception {
+		String s = null;
+		assertThatCode(() -> response.getWriter().write(s)).doesNotThrowAnyException();
+		verify(writer).write(s);
+	}
+
+	@Test
+	public void printWriterAppendNullCharSequenceDoesNotThrow() throws Exception {
+		CharSequence csq = null;
+		assertThatCode(() -> response.getWriter().append(csq)).doesNotThrowAnyException();
+		verify(writer).append(csq);
+	}
+
+	@Test
+	public void printWriterAppendNullCharSequenceIntIntDoesNotThrow() throws Exception {
+		CharSequence csq = null;
+		assertThatCode(() -> response.getWriter().append(csq, 0, 3)).doesNotThrowAnyException();
+		verify(writer).append(csq, 0, 3);
+	}
+
+	@Test
+	public void outputStreamPrintNullStringDoesNotThrow() throws Exception {
+		String s = null;
+		assertThatCode(() -> response.getOutputStream().print(s)).doesNotThrowAnyException();
+		verify(out).print(s);
+	}
+
+	@Test
+	public void outputStreamPrintlnNullStringDoesNotThrow() throws Exception {
+		String s = null;
+		assertThatCode(() -> response.getOutputStream().println(s)).doesNotThrowAnyException();
+		verify(out).println(s);
+	}
+
+	@Test
+	public void sendErrorWithNullMsgDoesNotThrow() throws Exception {
+		assertThatCode(() -> response.sendError(400, null)).doesNotThrowAnyException();
+	}
+
+	@Test
+	public void sendRedirectWithNullLocationDoesNotThrow() throws Exception {
+		assertThatCode(() -> response.sendRedirect(null)).doesNotThrowAnyException();
 	}
 }
