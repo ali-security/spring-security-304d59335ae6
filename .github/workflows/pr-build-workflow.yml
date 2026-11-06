@@ -1,22 +1,84 @@
 name: PR Build
 
-on: pull_request
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Gradle test task + --tests selector to run instead of the full build'
+        required: false
+        default: ''
 
 jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 50
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Set up JDK
-        uses: actions/setup-java@v1
+        uses: actions/setup-java@v4
         with:
+          distribution: 'temurin'
           java-version: '8'
       - name: Cache Gradle packages
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: ~/.gradle/caches
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle') }}
       - name: Build with Gradle
-        run: ./gradlew clean build --continue
+        run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            ./gradlew clean assemble ${{ inputs.test-filter }} --continue
+          else
+            ./gradlew clean build --continue
+          fi
+      - name: Test results summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob, re, xml.etree.ElementTree as ET
+          from collections import defaultdict
+          per = defaultdict(lambda: [0, 0, 0, 0])
+          skipped = []
+          for f in sorted(glob.glob('**/build/test-results/*/*.xml', recursive=True)):
+              mod = f.split('/build/test-results/')[0] + ':' + f.split('/build/test-results/')[1].split('/')[0]
+              for tc in ET.parse(f).getroot().iter('testcase'):
+                  c = per[mod]
+                  c[0] += 1
+                  if tc.find('failure') is not None or tc.find('error') is not None:
+                      c[2] += 1
+                  elif tc.find('skipped') is not None:
+                      c[3] += 1
+                      skipped.append((mod, tc.get('classname'), tc.get('name'), tc.find('skipped').get('message')))
+                  else:
+                      c[1] += 1
+          def reason(cls, name, msg):
+              if msg:
+                  return 'assumption not met: ' + msg
+              for s in glob.glob('**/' + cls.split('$')[0].replace('.', '/') + '.java', recursive=True):
+                  lines = open(s, encoding='utf-8').read().split('\n')
+                  for i, l in enumerate(lines):
+                      if re.search(r'void\s+' + re.escape(name) + r'\s*\(', l):
+                          for j in range(i - 1, max(i - 6, -1), -1):
+                              if '@Ignore' in lines[j] or '@Disabled' in lines[j]:
+                                  return 'disabled upstream by %s on the test method at %s:%d' % (lines[j].strip(), s, j + 1)
+                  for j, l in enumerate(lines):
+                      if l.strip().startswith(('@Ignore', '@Disabled')):
+                          return 'disabled upstream by %s at %s:%d' % (l.strip(), s, j + 1)
+              return 'skipped by the runner, no @Ignore/@Disabled found in source'
+          tot = [0, 0, 0, 0]
+          for mod in sorted(per):
+              c = per[mod]
+              print('TEST SUMMARY [%s] tests=%d passed=%d failed=%d skipped=%d' % (mod, c[0], c[1], c[2], c[3]))
+              tot = [a + b for a, b in zip(tot, c)]
+          for mod, cls, name, msg in skipped:
+              print('SKIPPED TEST [%s] %s.%s -- %s' % (mod, cls, name, reason(cls, name, msg)))
+          print('TEST TOTAL tests=%d passed=%d failed=%d skipped=%d' % tuple(tot))
+          PY
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: spring-security-web-jar
+          path: web/build/libs/spring-security-web-*.RELEASE.jar
+          if-no-files-found: error

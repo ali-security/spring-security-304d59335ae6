@@ -7,8 +7,16 @@ buildscript {
 		classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
 	}
 	repositories {
-		maven { url 'https://repo.spring.io/plugins-snapshot' }
+		maven { url 'https://repo.huaweicloud.com/repository/maven' }
 		maven { url 'https://plugins.gradle.org/m2/' }
+	}
+}
+
+allprojects {
+	repositories.all { repo ->
+		if (repo instanceof MavenArtifactRepository && repo.url.toString().contains('repo.spring.io')) {
+			repo.url = 'https://repo.huaweicloud.com/repository/maven/'
+		}
 	}
 }
 
